@@ -1,0 +1,37 @@
+# =============================================================================
+# values-local.yaml – minikube / local dev overrides
+#
+# Apply on top of values.yaml:
+#   helm install observability ./helm/observability \
+#     -n observability --create-namespace \
+#     -f helm/observability/values.yaml \
+#     -f helm/observability/values-local.yaml
+# =============================================================================
+
+# Grafana: expose via NodePort so you can reach it with `minikube service`
+grafana:
+  service:
+    type: NodePort
+    nodePort: 30300
+
+# Loki: disable PVC and explicitly mount emptyDir at /var/loki
+# (persistence.enabled:false does NOT auto-add emptyDir in loki v6 chart)
+loki:
+  singleBinary:
+    persistence:
+      enabled: false
+    extraVolumes:
+      - name: loki-storage
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: loki-storage
+        mountPath: /var/loki
+
+# Tempo: disable PVC – use emptyDir
+tempo:
+  persistence:
+    enabled: false
+
+# OTel Collector: single replica is enough locally
+opentelemetry-collector:
+  replicaCount: 1

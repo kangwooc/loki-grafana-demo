@@ -1,0 +1,35 @@
+# =============================================================================
+# Default values for the apps chart.
+# Override per-environment with values-local.yaml (minikube) etc.
+# =============================================================================
+
+django:
+  replicaCount: 1
+  image:
+    repository: django-app
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  env:
+    OTEL_SERVICE_NAME: django-app
+    # Collector lives in the observability namespace
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://observability-opentelemetry-collector.observability:4317"
+    # FastAPI service: <svc-name>.<namespace>:<port>
+    FASTAPI_URL: "http://fastapi.apps:8001"
+    DJANGO_SETTINGS_MODULE: config.settings
+    ALLOWED_HOSTS: "*"
+
+fastapi:
+  replicaCount: 1
+  image:
+    repository: fastapi-app
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8001
+  env:
+    OTEL_SERVICE_NAME: fastapi-app
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://observability-opentelemetry-collector.observability:4317"

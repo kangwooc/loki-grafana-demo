@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: fastapi
+spec:
+  type: {{ .Values.fastapi.service.type }}
+  selector:
+    app: fastapi
+  ports:
+    - name: http
+      port: {{ .Values.fastapi.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (eq .Values.fastapi.service.type "NodePort") .Values.fastapi.service.nodePort }}
+      nodePort: {{ .Values.fastapi.service.nodePort }}
+      {{- end }}

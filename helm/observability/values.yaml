@@ -1,0 +1,175 @@
+# =============================================================================
+# OpenTelemetry Collector
+# Receives OTLP gRPC traces from Django and FastAPI, then forwards to Tempo.
+# =============================================================================
+opentelemetry-collector:
+  mode: deployment
+
+  # Required since chart v0.108+ (breaking change)
+  image:
+    repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib
+
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+
+    processors:
+      batch: {}
+
+    exporters:
+      otlp/tempo:
+        endpoint: "observability-tempo:4317"
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlp/tempo]
+
+  ports:
+    otlp:
+      enabled: true
+      containerPort: 4317
+      servicePort: 4317
+      protocol: TCP
+    otlp-http:
+      enabled: true
+      containerPort: 4318
+      servicePort: 4318
+      protocol: TCP
+
+# =============================================================================
+# Promtail (DaemonSet)
+# Tails Pod stdout logs, parses JSON to extract trace_id and level as labels,
+# then ships to Loki.
+# =============================================================================
+promtail:
+  config:
+    clients:
+      - url: http://observability-loki:3100/loki/api/v1/push
+
+    snippets:
+      # Two-step JSON extraction:
+      # 1. Unpack the containerd log wrapper: {"log": "INNER_JSON", "stream": ...}
+      # 2. Parse the inner JSON to extract trace_id, level for Loki labels
+      pipelineStages:
+        - json:
+            expressions:
+              inner_log: log      # containerd wraps every line in {"log": "..."}
+        - json:
+            source: inner_log    # parse our actual JSON log payload
+            expressions:
+              trace_id: trace_id
+              level: level
+              message: message
+        - labels:
+            trace_id:
+            level:
+        - output:
+            source: inner_log    # store the clean inner JSON as the log line
+
+# =============================================================================
+# Grafana
+# Pre-configured with Loki and Tempo datasources.
+# Derived field on Loki datasource turns trace_id values into clickable links
+# that open the corresponding trace in Tempo.
+# =============================================================================
+grafana:
+  adminPassword: admin
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Loki
+          type: loki
+          uid: loki
+          url: http://observability-loki:3100
+          access: proxy
+          isDefault: true
+          jsonData:
+            derivedFields:
+              - name: TraceID
+                # Match the trace_id field value in JSON log lines
+                matcherRegex: '"trace_id":"(\w+)"'
+                url: "${__value.raw}"
+                datasourceUid: tempo
+
+        - name: Tempo
+          type: tempo
+          uid: tempo
+          url: http://observability-tempo:3100
+          access: proxy
+          jsonData:
+            tracesToLogsV2:
+              datasourceUid: loki
+              tags:
+                - key: service.name
+                  value: service
+
+# =============================================================================
+# Loki
+# Single-binary mode with filesystem storage (suitable for local dev / minikube).
+# =============================================================================
+loki:
+  deploymentMode: SingleBinary
+
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+    schemaConfig:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+
+  singleBinary:
+    replicas: 1
+    persistence:
+      enabled: true
+      size: 10Gi
+
+  # Disable components not needed for single-binary mode
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+
+# =============================================================================
+# Tempo
+# Single-binary mode with local filesystem storage.
+# =============================================================================
+tempo:
+  tempo:
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/traces
+        wal:
+          path: /var/tempo/wal
+
+  persistence:
+    enabled: true
+    size: 10Gi
