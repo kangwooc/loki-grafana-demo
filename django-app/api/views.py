@@ -22,3 +22,9 @@ def hello(request: HttpRequest) -> JsonResponse:
 
     logger.info("Django request handled successfully")
     return JsonResponse({"django": "ok", "fastapi": fastapi_data})
+
+
+def trigger_error(request: HttpRequest) -> JsonResponse:
+    """알림 테스트용 엔드포인트. 의도적으로 ERROR 로그를 출력한다."""
+    logger.error("Intentional error triggered for alerting test")
+    return JsonResponse({"error": "intentional error logged"}, status=500)
