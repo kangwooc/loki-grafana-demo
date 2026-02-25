@@ -122,6 +122,16 @@ grafana:
               tags:
                 - key: service.name
                   value: service
+            serviceMap:
+              datasourceUid: prometheus
+            nodeGraph:
+              enabled: true
+
+        - name: Prometheus
+          type: prometheus
+          uid: prometheus
+          url: http://observability-prometheus-server:9090
+          access: proxy
 
   dashboardProviders:
     dashboardproviders.yaml:
@@ -148,27 +158,45 @@ grafana:
             "timezone": "browser",
             "schemaVersion": 38,
             "time": {"from": "now-1h", "to": "now"},
-            "refresh": "30s",
+            "refresh": "10s",
             "panels": [
               {
                 "id": 1,
-                "type": "barchart",
-                "title": "Error Count by Endpoint (total in time range)",
-                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+                "type": "table",
+                "title": "Real-time Requests",
+                "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
                 "datasource": {"type": "loki", "uid": "loki"},
                 "targets": [{
                   "datasource": {"type": "loki", "uid": "loki"},
-                  "expr": "sum by (path) (count_over_time({namespace=\"apps\", level=\"ERROR\"}[$__range]))",
+                  "expr": "{namespace=\"apps\", path!=\"\"} | json",
                   "refId": "A",
-                  "legendFormat": "{{path}}"
+                  "queryType": "range"
                 }],
-                "options": {"orientation": "horizontal", "xTickLabelRotation": 0}
+                "options": {"showHeader": true, "sortBy": [{"displayName": "Time", "desc": true}]},
+                "fieldConfig": {
+                  "overrides": [
+                    {
+                      "matcher": {"id": "byName", "options": "status_code"},
+                      "properties": [
+                        {"id": "custom.displayMode", "value": "color-background"},
+                        {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 500}]}}
+                      ]
+                    },
+                    {
+                      "matcher": {"id": "byName", "options": "level"},
+                      "properties": [
+                        {"id": "custom.displayMode", "value": "color-background"},
+                        {"id": "mappings", "value": [{"type": "value", "options": {"ERROR": {"color": "red", "index": 0}, "INFO": {"color": "green", "index": 1}}}]}
+                      ]
+                    }
+                  ]
+                }
               },
               {
                 "id": 2,
                 "type": "timeseries",
                 "title": "Error Rate Over Time by Endpoint",
-                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
                 "datasource": {"type": "loki", "uid": "loki"},
                 "targets": [{
                   "datasource": {"type": "loki", "uid": "loki"},
@@ -179,22 +207,23 @@ grafana:
               },
               {
                 "id": 3,
-                "type": "timeseries",
-                "title": "Request Rate by Endpoint",
-                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-                "datasource": {"type": "loki", "uid": "loki"},
+                "type": "nodeGraph",
+                "title": "Service Graph",
+                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+                "datasource": {"type": "tempo", "uid": "tempo"},
                 "targets": [{
-                  "datasource": {"type": "loki", "uid": "loki"},
-                  "expr": "sum by (path) (rate({namespace=\"apps\", path!=\"\"}[$__interval]))",
+                  "datasource": {"type": "tempo", "uid": "tempo"},
+                  "queryType": "serviceMap",
                   "refId": "A",
-                  "legendFormat": "{{path}}"
+                  "serviceMapQuery": "{}",
+                  "serviceMapIncludeNamespace": false
                 }]
               },
               {
                 "id": 4,
                 "type": "logs",
                 "title": "Recent Error Logs",
-                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+                "gridPos": {"h": 8, "w": 24, "x": 0, "y": 18},
                 "datasource": {"type": "loki", "uid": "loki"},
                 "targets": [{
                   "datasource": {"type": "loki", "uid": "loki"},
@@ -326,6 +355,9 @@ loki:
 # =============================================================================
 tempo:
   tempo:
+    metricsGenerator:
+      enabled: true
+      remoteWriteUrl: "http://observability-prometheus-server:9090/api/v1/write"
     storage:
       trace:
         backend: local
@@ -337,3 +369,24 @@ tempo:
   persistence:
     enabled: true
     size: 10Gi
+
+# =============================================================================
+# Prometheus
+# Receives service graph metrics from Tempo metrics generator.
+# =============================================================================
+prometheus:
+  alertmanager:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  server:
+    extraFlags:
+      - web.enable-remote-write-receiver
+    service:
+      servicePort: 9090
+    persistentVolume:
+      enabled: false
