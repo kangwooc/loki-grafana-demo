@@ -70,9 +70,13 @@ promtail:
               trace_id: trace_id
               level: level
               message: message
+              path: path
+              method: method
         - labels:
             trace_id:
             level:
+            path:
+            method:
         - output:
             source: inner_log    # store the clean inner JSON as the log line
 
@@ -118,6 +122,89 @@ grafana:
               tags:
                 - key: service.name
                   value: service
+
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+  dashboards:
+    default:
+      endpoint-errors:
+        json: |
+          {
+            "id": null,
+            "uid": "endpoint-errors-v1",
+            "title": "Endpoint Error Dashboard",
+            "tags": [],
+            "timezone": "browser",
+            "schemaVersion": 38,
+            "time": {"from": "now-1h", "to": "now"},
+            "refresh": "30s",
+            "panels": [
+              {
+                "id": 1,
+                "type": "barchart",
+                "title": "Error Count by Endpoint (total in time range)",
+                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+                "datasource": {"type": "loki", "uid": "loki"},
+                "targets": [{
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "sum by (path) (count_over_time({namespace=\"apps\", level=\"ERROR\"}[$__range]))",
+                  "refId": "A",
+                  "legendFormat": "{{path}}"
+                }],
+                "options": {"orientation": "horizontal", "xTickLabelRotation": 0}
+              },
+              {
+                "id": 2,
+                "type": "timeseries",
+                "title": "Error Rate Over Time by Endpoint",
+                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+                "datasource": {"type": "loki", "uid": "loki"},
+                "targets": [{
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "sum by (path) (rate({namespace=\"apps\", level=\"ERROR\"}[$__interval]))",
+                  "refId": "A",
+                  "legendFormat": "{{path}}"
+                }]
+              },
+              {
+                "id": 3,
+                "type": "timeseries",
+                "title": "Request Rate by Endpoint",
+                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+                "datasource": {"type": "loki", "uid": "loki"},
+                "targets": [{
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "sum by (path) (rate({namespace=\"apps\", path!=\"\"}[$__interval]))",
+                  "refId": "A",
+                  "legendFormat": "{{path}}"
+                }]
+              },
+              {
+                "id": 4,
+                "type": "logs",
+                "title": "Recent Error Logs",
+                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+                "datasource": {"type": "loki", "uid": "loki"},
+                "targets": [{
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "{namespace=\"apps\", level=\"ERROR\"}",
+                  "refId": "A"
+                }],
+                "options": {"showTime": true, "showLabels": true, "wrapLogMessage": true}
+              }
+            ]
+          }
 
   alerting:
     # Contact Point: Slack webhook
