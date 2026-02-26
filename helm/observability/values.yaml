@@ -70,9 +70,13 @@ promtail:
               trace_id: trace_id
               level: level
               message: message
+              path: path
+              method: method
         - labels:
             trace_id:
             level:
+            path:
+            method:
         - output:
             source: inner_log    # store the clean inner JSON as the log line
 
@@ -118,6 +122,118 @@ grafana:
               tags:
                 - key: service.name
                   value: service
+            serviceMap:
+              datasourceUid: prometheus
+            nodeGraph:
+              enabled: true
+
+        - name: Prometheus
+          type: prometheus
+          uid: prometheus
+          url: http://observability-prometheus-server:9090
+          access: proxy
+
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+  dashboards:
+    default:
+      endpoint-errors:
+        json: |
+          {
+            "id": null,
+            "uid": "endpoint-errors-v1",
+            "title": "Endpoint Error Dashboard",
+            "tags": [],
+            "timezone": "browser",
+            "schemaVersion": 38,
+            "time": {"from": "now-1h", "to": "now"},
+            "refresh": "10s",
+            "panels": [
+              {
+                "id": 1,
+                "type": "table",
+                "title": "Real-time Requests",
+                "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+                "datasource": {"type": "loki", "uid": "loki"},
+                "targets": [{
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "{namespace=\"apps\", path!=\"\"} | json",
+                  "refId": "A",
+                  "queryType": "range"
+                }],
+                "options": {"showHeader": true, "sortBy": [{"displayName": "Time", "desc": true}]},
+                "fieldConfig": {
+                  "overrides": [
+                    {
+                      "matcher": {"id": "byName", "options": "status_code"},
+                      "properties": [
+                        {"id": "custom.displayMode", "value": "color-background"},
+                        {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 500}]}}
+                      ]
+                    },
+                    {
+                      "matcher": {"id": "byName", "options": "level"},
+                      "properties": [
+                        {"id": "custom.displayMode", "value": "color-background"},
+                        {"id": "mappings", "value": [{"type": "value", "options": {"ERROR": {"color": "red", "index": 0}, "INFO": {"color": "green", "index": 1}}}]}
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "id": 2,
+                "type": "timeseries",
+                "title": "Error Rate Over Time by Endpoint",
+                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+                "datasource": {"type": "loki", "uid": "loki"},
+                "targets": [{
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "sum by (path) (rate({namespace=\"apps\", level=\"ERROR\"}[$__interval]))",
+                  "refId": "A",
+                  "legendFormat": "{{path}}"
+                }]
+              },
+              {
+                "id": 3,
+                "type": "nodeGraph",
+                "title": "Service Graph",
+                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+                "datasource": {"type": "tempo", "uid": "tempo"},
+                "targets": [{
+                  "datasource": {"type": "tempo", "uid": "tempo"},
+                  "queryType": "serviceMap",
+                  "refId": "A",
+                  "serviceMapQuery": "{}",
+                  "serviceMapIncludeNamespace": false
+                }]
+              },
+              {
+                "id": 4,
+                "type": "logs",
+                "title": "Recent Error Logs",
+                "gridPos": {"h": 8, "w": 24, "x": 0, "y": 18},
+                "datasource": {"type": "loki", "uid": "loki"},
+                "targets": [{
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "{namespace=\"apps\", level=\"ERROR\"}",
+                  "refId": "A"
+                }],
+                "options": {"showTime": true, "showLabels": true, "wrapLogMessage": true}
+              }
+            ]
+          }
 
   alerting:
     # Contact Point: Slack webhook
@@ -239,6 +355,9 @@ loki:
 # =============================================================================
 tempo:
   tempo:
+    metricsGenerator:
+      enabled: true
+      remoteWriteUrl: "http://observability-prometheus-server:9090/api/v1/write"
     storage:
       trace:
         backend: local
@@ -250,3 +369,24 @@ tempo:
   persistence:
     enabled: true
     size: 10Gi
+
+# =============================================================================
+# Prometheus
+# Receives service graph metrics from Tempo metrics generator.
+# =============================================================================
+prometheus:
+  alertmanager:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  server:
+    extraFlags:
+      - web.enable-remote-write-receiver
+    service:
+      servicePort: 9090
+    persistentVolume:
+      enabled: false

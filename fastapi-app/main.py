@@ -9,6 +9,8 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 # ---------------------------------------------------------------------------
 # OpenTelemetry initialisation – must happen before the app is created so
@@ -46,6 +48,10 @@ class OtelJsonFormatter(logging.Formatter):
             # trace_id and span_id allow Grafana to link logs → Tempo traces
             "trace_id": format(ctx.trace_id, "032x") if ctx.is_valid else "",
             "span_id": format(ctx.span_id, "016x") if ctx.is_valid else "",
+            # request context (populated by RequestLoggingMiddleware)
+            "path": getattr(record, "path", ""),
+            "method": getattr(record, "method", ""),
+            "status_code": getattr(record, "status_code", ""),
         }
 
         if record.exc_info:
@@ -61,10 +67,33 @@ logging.root.handlers = [_handler]
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Request logging middleware
+# ---------------------------------------------------------------------------
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Emits one structured log line per HTTP request."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        level = logging.ERROR if response.status_code >= 500 else logging.INFO
+        logger.log(
+            level,
+            "HTTP request",
+            extra={
+                "path": request.url.path,
+                "method": request.method,
+                "status_code": response.status_code,
+            },
+        )
+        return response
+
+
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 app = FastAPI(title="FastAPI Demo")
+app.add_middleware(RequestLoggingMiddleware)
 
 # Instrument after app creation; propagates the incoming W3C traceparent header
 # so this service's spans are children of the Django span.
